@@ -54,17 +54,12 @@ impl AudioHandle {
 
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let Some(device) = host.default_output_device() else {
-                let _ = output_tx.send(Err("No default output device".to_string()));
-                return;
-            };
-            let Ok(device_name) = device.name() else {
-                let _ = output_tx.send(Err("Failed to get default output device name".to_string()));
-                return;
-            };
-            let Ok((stream, sink)) = create_output(&device) else {
-                let _ = output_tx.send(Err("Failed to open default output stream".to_string()));
-                return;
+            let (stream, sink) = match create_default_output() {
+                Ok(output) => output,
+                Err(e) => {
+                    let _ = output_tx.send(Err(format!("Failed to open audio output: {}", e)));
+                    return;
+                }
             };
 
             let output = Arc::new(Mutex::new(AudioOutputState { sink, muted: false }));
@@ -72,7 +67,9 @@ impl AudioHandle {
 
             let mut active_stream = Some(stream);
             let mut device_state = OutputDeviceState::default();
-            device_state.set_active(device_name);
+            if let Some(device_name) = host.default_output_device().and_then(|d| d.name().ok()) {
+                device_state.set_active(device_name);
+            }
             let mut last_error_device = None;
 
             loop {
@@ -83,12 +80,10 @@ impl AudioHandle {
 
                 let Some(device) = host.default_output_device() else {
                     device_state.needs_reopen(None);
-                    active_stream = None;
                     continue;
                 };
                 let Ok(device_name) = device.name() else {
                     device_state.needs_reopen(None);
-                    active_stream = None;
                     continue;
                 };
                 if !device_state.needs_reopen(Some(device_name.clone())) {
@@ -150,6 +145,12 @@ impl AudioHandle {
 
 fn create_output(device: &cpal::Device) -> Result<(OutputStream, Arc<Sink>)> {
     let (stream, handle) = OutputStream::try_from_device(device)?;
+    let sink = Arc::new(Sink::try_new(&handle)?);
+    Ok((stream, sink))
+}
+
+fn create_default_output() -> Result<(OutputStream, Arc<Sink>)> {
+    let (stream, handle) = OutputStream::try_default()?;
     let sink = Arc::new(Sink::try_new(&handle)?);
     Ok((stream, sink))
 }

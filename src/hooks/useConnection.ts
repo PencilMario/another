@@ -71,9 +71,10 @@ export function useConnection(opts: UseConnectionOptions) {
     try { await invoke("set_muted", { muted: m }); } catch { }
   }, []);
 
-  const connectToDevice = useCallback(async (device: Device, s: Settings, silent = false) => {
+  const connectToDevice = useCallback(async (device: Device, s: Settings) => {
     setConnectingSerial(device.serial);
     cleanupDecoder();
+    let connectionReady = false;
     try {
       const channel = new Channel<FrameEvent>();
       channel.onmessage = (msg) => {
@@ -175,6 +176,7 @@ export function useConnection(opts: UseConnectionOptions) {
       nativeSize.current = { width, height };
       displaySizeRef.current = { width, height };
       setDeviceSize({ width, height });
+      connectionReady = true;
       setConnectedDevice(device);
       setScreen("another");
 
@@ -196,7 +198,11 @@ export function useConnection(opts: UseConnectionOptions) {
       await win.setSize(new LogicalSize(Math.max(viewW, 280), viewH + chromeH));
       isProgrammaticResize.current = false;
     } catch (e) {
-      if (!silent) showToast(`Failed to connect: ${e}`);
+      if (!connectionReady) {
+        setConnectedDevice(null);
+        setScreen("welcome");
+      }
+      showToast(`Failed to connect: ${e}`);
     } finally {
       setConnectingSerial(null);
       isReconnecting.current = false;
@@ -218,7 +224,7 @@ export function useConnection(opts: UseConnectionOptions) {
     reconnectTimer.current = setTimeout(() => {
       if (connectedDevice) {
         isReconnecting.current = true;
-        connectToDevice(connectedDevice, s, true);
+        connectToDevice(connectedDevice, s);
       }
     }, 800);
   }, [connectedDevice, connectToDevice]);
