@@ -1,45 +1,157 @@
 use anyhow::Result;
+use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 
 const FLAG_CONFIG: u64 = 1 << 63;
+const OUTPUT_DEVICE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+#[derive(Default)]
+struct OutputDeviceState {
+    active_name: Option<String>,
+}
+
+impl OutputDeviceState {
+    fn needs_reopen(&mut self, observed_name: Option<String>) -> bool {
+        let Some(observed_name) = observed_name else {
+            self.active_name = None;
+            return false;
+        };
+
+        if self.active_name.as_deref() == Some(observed_name.as_str()) {
+            return false;
+        }
+
+        self.active_name = None;
+        true
+    }
+
+    fn set_active(&mut self, name: String) {
+        self.active_name = Some(name);
+    }
+}
 
 pub struct AudioHandle {
-    pub sink: Arc<Sink>,
+    output: Arc<Mutex<AudioOutputState>>,
     _shutdown_tx: std::sync::mpsc::Sender<()>,
+}
+
+struct AudioOutputState {
+    sink: Arc<Sink>,
+    muted: bool,
 }
 
 impl AudioHandle {
     pub fn new() -> Result<Self> {
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
-        let (sink_tx, sink_rx) = std::sync::mpsc::sync_channel::<Arc<Sink>>(1);
+        let (output_tx, output_rx) = std::sync::mpsc::sync_channel::<
+            std::result::Result<Arc<Mutex<AudioOutputState>>, String>,
+        >(1);
 
         std::thread::spawn(move || {
-            let Ok((_stream, handle)) = OutputStream::try_default() else {
-                eprintln!("[audio] failed to open output stream");
+            let host = cpal::default_host();
+            let Some(device) = host.default_output_device() else {
+                let _ = output_tx.send(Err("No default output device".to_string()));
                 return;
             };
-            let Ok(sink) = Sink::try_new(&handle) else {
-                eprintln!("[audio] failed to create sink");
+            let Ok(device_name) = device.name() else {
+                let _ = output_tx.send(Err("Failed to get default output device name".to_string()));
                 return;
             };
-            let sink = Arc::new(sink);
-            let _ = sink_tx.send(sink);
-            let _ = shutdown_rx.recv();
+            let Ok((stream, sink)) = create_output(&device) else {
+                let _ = output_tx.send(Err("Failed to open default output stream".to_string()));
+                return;
+            };
+
+            let output = Arc::new(Mutex::new(AudioOutputState { sink, muted: false }));
+            let _ = output_tx.send(Ok(output.clone()));
+
+            let mut active_stream = Some(stream);
+            let mut device_state = OutputDeviceState::default();
+            device_state.set_active(device_name);
+            let mut last_error_device = None;
+
+            loop {
+                match shutdown_rx.recv_timeout(OUTPUT_DEVICE_POLL_INTERVAL) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+
+                let Some(device) = host.default_output_device() else {
+                    device_state.needs_reopen(None);
+                    active_stream = None;
+                    continue;
+                };
+                let Ok(device_name) = device.name() else {
+                    device_state.needs_reopen(None);
+                    active_stream = None;
+                    continue;
+                };
+                if !device_state.needs_reopen(Some(device_name.clone())) {
+                    continue;
+                }
+
+                match create_output(&device) {
+                    Ok((stream, sink)) => {
+                        let mut current = output.lock().unwrap_or_else(|e| e.into_inner());
+                        sink.set_volume(if current.muted {
+                            0.0
+                        } else {
+                            1.0
+                        });
+                        current.sink = sink;
+                        active_stream = Some(stream);
+                        drop(current);
+                        device_state.set_active(device_name.clone());
+                        last_error_device = None;
+                        eprintln!("[audio] switched output device: {}", device_name);
+                    }
+                    Err(e) => {
+                        if last_error_device.as_deref() != Some(device_name.as_str()) {
+                            eprintln!("[audio] failed to open output device {}: {}", device_name, e);
+                            last_error_device = Some(device_name);
+                        }
+                    }
+                }
+            }
+
+            drop(active_stream);
         });
 
-        let sink = sink_rx
+        let output = output_rx
             .recv()
-            .map_err(|_| anyhow::anyhow!("Failed to initialize audio output"))?;
+            .map_err(|_| anyhow::anyhow!("Failed to initialize audio output"))?
+            .map_err(anyhow::Error::msg)?;
 
         Ok(Self {
-            sink,
+            output,
             _shutdown_tx: shutdown_tx,
         })
     }
+
+    fn current_sink(&self) -> Arc<Sink> {
+        self.output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .sink
+            .clone()
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        let mut output = self.output.lock().unwrap_or_else(|e| e.into_inner());
+        output.muted = muted;
+        output.sink.set_volume(if muted { 0.0 } else { 1.0 });
+    }
+}
+
+fn create_output(device: &cpal::Device) -> Result<(OutputStream, Arc<Sink>)> {
+    let (stream, handle) = OutputStream::try_from_device(device)?;
+    let sink = Arc::new(Sink::try_new(&handle)?);
+    Ok((stream, sink))
 }
 
 pub async fn stream_audio(
@@ -48,7 +160,7 @@ pub async fn stream_audio(
     shutdown: Arc<Notify>,
 ) {
     let result = tokio::select! {
-        r = playback_loop(&mut audio_socket, &audio.sink) => r,
+        r = playback_loop(&mut audio_socket, &audio) => r,
         _ = shutdown.notified() => Ok(()),
     };
 
@@ -57,7 +169,7 @@ pub async fn stream_audio(
     }
 }
 
-async fn playback_loop(socket: &mut TcpStream, sink: &Sink) -> Result<()> {
+async fn playback_loop(socket: &mut TcpStream, audio: &AudioHandle) -> Result<()> {
     let mut packet_count: u64 = 0;
 
     loop {
@@ -81,6 +193,7 @@ async fn playback_loop(socket: &mut TcpStream, sink: &Sink) -> Result<()> {
         }
 
         packet_count += 1;
+        let sink = audio.current_sink();
         if packet_count <= 3 || packet_count % 500 == 0 {
             eprintln!(
                 "[audio] packet #{}: {} bytes, sink queue: {}",
@@ -105,5 +218,30 @@ async fn playback_loop(socket: &mut TcpStream, sink: &Sink) -> Result<()> {
 
         let source = SamplesBuffer::new(2, 48000, samples);
         sink.append(source);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OutputDeviceState;
+
+    #[test]
+    fn requests_reopen_when_default_output_changes() {
+        let mut state = OutputDeviceState::default();
+
+        assert!(state.needs_reopen(Some("Speakers".to_string())));
+        state.set_active("Speakers".to_string());
+        assert!(!state.needs_reopen(Some("Speakers".to_string())));
+        assert!(state.needs_reopen(Some("Headphones".to_string())));
+        assert!(state.needs_reopen(Some("Speakers".to_string())));
+    }
+
+    #[test]
+    fn requests_reopen_when_default_device_returns_after_disappearing() {
+        let mut state = OutputDeviceState::default();
+
+        state.set_active("Speakers".to_string());
+        assert!(!state.needs_reopen(None));
+        assert!(state.needs_reopen(Some("Speakers".to_string())));
     }
 }

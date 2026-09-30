@@ -118,11 +118,7 @@ pub async fn set_muted(muted: bool, state: State<'_, AppState>) -> Result<(), St
     let session = state.session.lock().await;
     let session = session.as_ref().ok_or("Not connected")?;
     if let Some(audio) = &session.audio {
-        if muted {
-            audio.sink.set_volume(0.0);
-        } else {
-            audio.sink.set_volume(1.0);
-        }
+        audio.set_muted(muted);
     }
     Ok(())
 }
