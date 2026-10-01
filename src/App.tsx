@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Settings, Device, QuickActionId } from "./types";
-import { PRESETS, DEFAULT_PINNED_ACTIONS } from "./types";
+import { PRESETS, DEFAULT_PINNED_ACTIONS, QUICK_ACTIONS } from "./types";
 import { useTheme } from "./hooks/useTheme";
 import { useToasts } from "./hooks/useToasts";
 import { useDevices } from "./hooks/useDevices";
@@ -47,8 +47,16 @@ function App() {
   });
 
   const [pinnedActions, setPinnedActions] = useState<QuickActionId[]>(() => {
-    localStorage.removeItem("pinned_actions");
-    return DEFAULT_PINNED_ACTIONS;
+    const stored = localStorage.getItem("pinned_actions");
+    if (!stored) return DEFAULT_PINNED_ACTIONS;
+    try {
+      const actions: unknown = JSON.parse(stored);
+      return Array.isArray(actions) && actions.every((action) =>
+        typeof action === "string" && QUICK_ACTIONS.some(({ id }) => id === action)
+      ) ? actions as QuickActionId[] : DEFAULT_PINNED_ACTIONS;
+    } catch {
+      return DEFAULT_PINNED_ACTIONS;
+    }
   });
 
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
