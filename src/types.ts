@@ -82,7 +82,7 @@ export const CODEC_OPTIONS = [
   { value: "h264", label: "H.264" },
 ];
 
-export type QuickActionId = "record" | "mute" | "volume_up" | "volume_down" | "power" | "macro-toggle" | "rotate";
+export type QuickActionId = "record" | "mute" | "volume_up" | "volume_down" | "power" | "back" | "macro-toggle" | "rotate";
 
 export const QUICK_ACTIONS: { id: QuickActionId; label: string }[] = [
   { id: "record", label: "Record" },
@@ -90,6 +90,7 @@ export const QUICK_ACTIONS: { id: QuickActionId; label: string }[] = [
   { id: "volume_up", label: "Vol+" },
   { id: "volume_down", label: "Vol-" },
   { id: "power", label: "Power" },
+  { id: "back", label: "Back" },
   { id: "macro-toggle", label: "Macro" },
   { id: "rotate", label: "Rotate" },
 ];
