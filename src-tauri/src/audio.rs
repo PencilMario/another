@@ -215,6 +215,8 @@ async fn playback_loop(socket: &mut TcpStream, audio: &AudioHandle) -> Result<()
 
         if sink.len() > 8 {
             sink.clear();
+            // rodio pauses the sink when clearing it.
+            sink.play();
         }
 
         let source = SamplesBuffer::new(2, 48000, samples);
