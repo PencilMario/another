@@ -10,6 +10,7 @@ import {
   SignalIcon,
   ComputerDesktopIcon,
   WifiIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
   Dialog,
@@ -20,8 +21,8 @@ import {
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Device, ThemePreference } from "../types";
-import { getDeviceDisplayName, getDeviceNickname, setDeviceNickname } from "../types";
+import type { Device, ThemePreference, WifiConnectionHistory } from "../types";
+import { getDeviceDisplayName, getDeviceNickname, setDeviceNickname, getWifiConnectionHistory, saveWifiConnection, removeWifiConnection } from "../types";
 import appIcon from "../assets/icon.png";
 
 interface WelcomeScreenProps {
@@ -56,11 +57,14 @@ export function WelcomeScreen({
   const [showWifiDialog, setShowWifiDialog] = useState(false);
   const [wifiAddress, setWifiAddress] = useState("");
   const [wifiConnecting, setWifiConnecting] = useState(false);
+  const [wifiHistory, setWifiHistory] = useState<WifiConnectionHistory[]>([]);
   const [togglingSerial, setTogglingSerial] = useState<string | null>(null);
   const [editingSerial, setEditingSerial] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; device: Device } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setWifiHistory(getWifiConnectionHistory()), []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -79,12 +83,18 @@ export function WelcomeScreen({
     setContextMenu({ x: e.clientX, y: e.clientY, device });
   };
 
-  const handleWifiConnect = async () => {
-    if (!wifiAddress.trim()) return;
+  const handleWifiConnect = async (requestedAddress = wifiAddress) => {
+    if (!requestedAddress.trim()) return;
     setWifiConnecting(true);
     try {
-      const addr = wifiAddress.includes(":") ? wifiAddress : `${wifiAddress}:5555`;
+      const addr = requestedAddress.includes(":") ? requestedAddress : `${requestedAddress}:5555`;
       await invoke("wifi_connect", { address: addr });
+      let deviceName = "Unknown device";
+      try {
+        const found = (await invoke<Device[]>("list_devices")).find((d) => d.serial === addr && d.state === "device");
+        if (found) deviceName = getDeviceDisplayName(found);
+      } catch { /* refresh below will surface device state */ }
+      setWifiHistory(saveWifiConnection(addr, deviceName));
       showToast("Device connected via WiFi", "info");
       setWifiAddress("");
       setShowWifiDialog(false);
@@ -287,17 +297,40 @@ export function WelcomeScreen({
                   placeholder="192.168.1.100"
                   value={wifiAddress}
                   onChange={(e) => setWifiAddress(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleWifiConnect()}
+                  onKeyDown={(e) => e.key === "Enter" && void handleWifiConnect()}
                   autoFocus
                 />
                 <Button
                   className="shrink-0"
-                  onClick={handleWifiConnect}
+                  onClick={() => void handleWifiConnect()}
                   disabled={wifiConnecting || !wifiAddress.trim()}
                 >
                   {wifiConnecting ? <div className="size-3.5 border-2 border-border border-t-brand rounded-full animate-spin" /> : "Connect"}
                 </Button>
               </div>
+              {wifiHistory.length > 0 && (
+                <div className="mt-4 border-t border-border pt-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-text-3 mb-2">Recent connections</div>
+                  <div className="space-y-0.5">
+                    {wifiHistory.map((item) => (
+                      <div key={item.address} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-surface-2">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => { setWifiAddress(item.address); void handleWifiConnect(item.address); }}
+                          disabled={wifiConnecting}
+                        >
+                          <div className="text-xs font-medium truncate">{item.deviceName}</div>
+                          <div className="text-[10px] font-mono text-text-3 truncate">{item.address}</div>
+                        </button>
+                        <Button variant="ghost" size="icon-xs" className="shrink-0 text-text-3" title="Remove history" onClick={() => setWifiHistory(removeWifiConnection(item.address))}>
+                          <XMarkIcon />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </DialogPrimitive.Popup>
         </DialogPortal>

@@ -5,6 +5,39 @@ export interface Device {
   wifi_available?: boolean;
 }
 
+export interface WifiConnectionHistory {
+  address: string;
+  deviceName: string;
+  lastConnected: number;
+}
+
+const WIFI_HISTORY_KEY = "wifi_connection_history";
+const WIFI_HISTORY_LIMIT = 8;
+
+export function getWifiConnectionHistory(): WifiConnectionHistory[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WIFI_HISTORY_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.address) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveWifiConnection(address: string, deviceName: string) {
+  const next = [
+    { address, deviceName: deviceName || "Unknown device", lastConnected: Date.now() },
+    ...getWifiConnectionHistory().filter((item) => item.address !== address),
+  ].slice(0, WIFI_HISTORY_LIMIT);
+  localStorage.setItem(WIFI_HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function removeWifiConnection(address: string) {
+  const next = getWifiConnectionHistory().filter((item) => item.address !== address);
+  localStorage.setItem(WIFI_HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
 export interface Toast {
   id: number;
   message: string;
