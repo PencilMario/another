@@ -91,6 +91,7 @@ export function SettingsDialog({
   const [mcpOpen, setMcpOpen] = useState(true);
   const [savePath, setSavePath] = useState(() => localStorage.getItem("save_path") || "");
   const [toolbarOpen, setToolbarOpen] = useState(true);
+  const [connectionOpen, setConnectionOpen] = useState(true);
 
   const [mcpEnabled, setMcpEnabled] = useState(() => {
     const stored = localStorage.getItem("mcp_enabled");
@@ -238,6 +239,14 @@ export function SettingsDialog({
                 <div className="text-[11px] text-text-3 mt-1">Automatically adjusts quality based on network conditions</div>
               </div>
             </CollapsibleContent>
+          </Collapsible>
+
+          <Collapsible open={connectionOpen} onOpenChange={setConnectionOpen}>
+            <SectionHeader open={connectionOpen}>Connection Info</SectionHeader>
+            <CollapsibleContent><div className="px-5 py-4 border-b border-border/60">
+              <div className="flex items-center justify-between"><span className="text-[13px] font-medium text-foreground">Show connection overlay</span><Switch checked={settings.show_connection_info} onCheckedChange={(checked) => onUpdateSetting("show_connection_info", checked)} /></div>
+              <div className="text-[11px] text-text-3 mt-1">Display live stream diagnostics on the mirror</div>
+            </div></CollapsibleContent>
           </Collapsible>
 
           <Collapsible open={audioOpen} onOpenChange={setAudioOpen}>

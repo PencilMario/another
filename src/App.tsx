@@ -129,6 +129,7 @@ function App() {
     handleKeyDown,
     handleCompositionStart,
     handleCompositionEnd,
+    connectionInfo,
   } = useConnection({
     settings,
     showToast,
@@ -280,6 +281,7 @@ function App() {
           pinnedActions={pinnedActions}
           alwaysOnTop={alwaysOnTop}
           adaptiveInfo={settings.adaptive ? { enabled: true, tierName: adaptive.metrics.tierName, fps: adaptive.metrics.fps } : undefined}
+          connectionInfo={settings.show_connection_info ? connectionInfo : undefined}
           onToggleRecording={toggleRecording}
           onToggleMacroRecording={macro.toggleRecording}
           onPressButton={pressButton}

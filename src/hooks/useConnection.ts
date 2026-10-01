@@ -3,6 +3,7 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import type { Device, Settings, FrameEvent, Screen, MacroEvent } from "../types";
+import { calculateConnectionSample } from "../lib/connectionMetrics";
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -46,6 +47,11 @@ export function useConnection(opts: UseConnectionOptions) {
   const displaySizeRef = useRef({ width: 1080, height: 1920 });
   const resizeSnapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isProgrammaticResize = useRef(false);
+  const bytesRef = useRef(0);
+  const framesRef = useRef(0);
+  const droppedFramesRef = useRef(0);
+  const connectedAtRef = useRef<number | null>(null);
+  const [connectionInfo, setConnectionInfo] = useState({ bitrateMbps: 0, fps: 0, dropRate: null as number | null, targetFps: 0, queueSize: 0, codec: "", duration: 0 });
 
   const cleanupDecoder = useCallback(() => {
     if (rafId.current) {
@@ -61,6 +67,10 @@ export function useConnection(opts: UseConnectionOptions) {
       decoderRef.current = null;
     }
     setMutedState(false);
+    bytesRef.current = 0;
+    framesRef.current = 0;
+    droppedFramesRef.current = 0;
+    connectedAtRef.current = null;
     if (recorderRef.current && recorderRef.current.state === "recording") {
       recorderRef.current.stop();
     }
@@ -83,8 +93,9 @@ export function useConnection(opts: UseConnectionOptions) {
           const descBytes = b64ToBytes(msg.data.description);
           const decoder = new VideoDecoder({
             output: (frame: VideoFrame) => {
+              framesRef.current++;
               opts.onFrameReceived?.();
-              if (pendingFrame.current) pendingFrame.current.close();
+              if (pendingFrame.current) { pendingFrame.current.close(); droppedFramesRef.current++; }
               pendingFrame.current = frame;
               if (!rafId.current) {
                 rafId.current = requestAnimationFrame(() => {
@@ -157,6 +168,7 @@ export function useConnection(opts: UseConnectionOptions) {
             timestamp: msg.data.timestamp,
             data: bytes,
           }));
+          bytesRef.current += msg.data.size;
         } else if (msg.event === "disconnected") {
           cleanupDecoder();
           if (!isReconnecting.current) {
@@ -177,6 +189,7 @@ export function useConnection(opts: UseConnectionOptions) {
       displaySizeRef.current = { width, height };
       setDeviceSize({ width, height });
       connectionReady = true;
+      connectedAtRef.current = Date.now();
       setConnectedDevice(device);
       setScreen("another");
 
@@ -208,6 +221,15 @@ export function useConnection(opts: UseConnectionOptions) {
       isReconnecting.current = false;
     }
   }, [showToast, cleanupDecoder]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const sample = calculateConnectionSample(bytesRef.current, framesRef.current, droppedFramesRef.current, opts.settings.max_fps);
+      bytesRef.current = 0; framesRef.current = 0; droppedFramesRef.current = 0;
+      setConnectionInfo({ ...sample, queueSize: decoderRef.current?.decodeQueueSize ?? 0, codec: opts.settings.video_codec.toUpperCase(), duration: connectedAtRef.current ? Math.floor((Date.now() - connectedAtRef.current) / 1000) : 0 });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [opts.settings.max_fps, opts.settings.video_codec]);
 
   const disconnect = useCallback(async () => {
     cleanupDecoder();
@@ -433,5 +455,6 @@ export function useConnection(opts: UseConnectionOptions) {
     handleKeyDown,
     handleCompositionStart,
     handleCompositionEnd,
+    connectionInfo,
   };
 }

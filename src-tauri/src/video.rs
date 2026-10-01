@@ -21,7 +21,7 @@ pub enum FrameEvent {
     #[serde(rename = "config")]
     Config { codec: String, description: String },
     #[serde(rename = "packet")]
-    Packet { key: bool, data: String, timestamp: u64 },
+    Packet { key: bool, data: String, timestamp: u64, size: usize },
     #[serde(rename = "disconnected")]
     Disconnected { reason: String },
 }
@@ -82,6 +82,7 @@ async fn forward_loop(
                 key: is_key,
                 data: base64::engine::general_purpose::STANDARD.encode(&avcc),
                 timestamp: pts,
+                size,
             });
         }
     }

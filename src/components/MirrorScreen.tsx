@@ -47,6 +47,7 @@ interface MirrorScreenProps {
   pinnedActions: QuickActionId[];
   alwaysOnTop: boolean;
   adaptiveInfo?: { enabled: boolean; tierName: string; fps: number };
+  connectionInfo?: { bitrateMbps: number; fps: number; dropRate: number | null; targetFps: number; queueSize: number; codec: string; duration: number };
   onToggleRecording: () => void;
   onToggleMacroRecording: () => void;
   onPressButton: (button: string) => void;
@@ -86,6 +87,7 @@ export function MirrorScreen({
   pinnedActions,
   alwaysOnTop,
   adaptiveInfo,
+  connectionInfo,
   onToggleRecording,
   onToggleMacroRecording,
   onPressButton,
@@ -259,6 +261,17 @@ export function MirrorScreen({
         {adaptiveInfo?.enabled && (
           <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/60 backdrop-blur-lg rounded-md text-text-2 font-mono text-[10px] z-5 pointer-events-none">
             {adaptiveInfo.tierName} &middot; {adaptiveInfo.fps} FPS
+          </div>
+        )}
+        {connectionInfo && (
+          <div className="absolute bottom-2 left-2 pointer-events-none bg-black/75 backdrop-blur-lg rounded-md px-2.5 py-2 text-[10px] text-white font-mono z-5 leading-5">
+            <div className="font-bold tracking-wide text-white/90">● CONNECTED</div>
+            <div>{`码率  ${connectionInfo.bitrateMbps.toFixed(1)} Mbps`}</div>
+            <div>{`帧率  ${connectionInfo.fps} / ${connectionInfo.targetFps} FPS`}</div>
+            <div>{`分辨率  ${deviceSize.width} × ${deviceSize.height}`}</div>
+            <div>{`解码队列  ${connectionInfo.queueSize} frame`}</div>
+            <div>{`丢帧率  ${connectionInfo.dropRate === null ? "—" : `${connectionInfo.dropRate.toFixed(1)}%`}`}</div>
+            <div className="text-white/60">{connectionInfo.codec} · {formatTime(connectionInfo.duration)}</div>
           </div>
         )}
       </div>
