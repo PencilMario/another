@@ -204,6 +204,12 @@ async fn playback_loop(socket: &mut TcpStream, audio: &AudioHandle) -> Result<()
             );
         }
 
+        // A vanished output device cannot drain its sink. Drop new packets instead of
+        // blocking in Sink::clear(), so a replacement sink can receive later packets.
+        if sink.len() >= 8 {
+            continue;
+        }
+
         let samples: Vec<i16> = data
             .chunks_exact(2)
             .map(|c| i16::from_le_bytes([c[0], c[1]]))
@@ -211,12 +217,6 @@ async fn playback_loop(socket: &mut TcpStream, audio: &AudioHandle) -> Result<()
 
         if samples.is_empty() {
             continue;
-        }
-
-        if sink.len() > 8 {
-            sink.clear();
-            // rodio pauses the sink when clearing it.
-            sink.play();
         }
 
         let source = SamplesBuffer::new(2, 48000, samples);
